@@ -18,9 +18,11 @@
     function _sanitize(u) { if(!u) return null; const {password, ...safe} = u; return safe; }
 
     async function getAll() {
-      const { data, error } = await supabase.from('users').select('*').order('id', { ascending: true });
-      if (error) throw error;
-      return data;
+      try {
+        const { data, error } = await supabase.from('users').select('*').order('id', { ascending: true });
+        if (error) throw error;
+        return data || [];
+      } catch (e) { console.error("DB.getAll error:", e); return []; }
     }
 
     async function getAllSafe() {
@@ -29,15 +31,19 @@
     }
 
     async function findByEmail(email) {
-      const { data, error } = await supabase.from('users').select('*').eq('email', email.toLowerCase()).single();
-      if (error && error.code !== 'PGRST116') throw error;
-      return data || null;
+      try {
+        const { data, error } = await supabase.from('users').select('*').eq('email', email.toLowerCase()).maybeSingle();
+        if (error) throw error;
+        return data || null;
+      } catch (e) { console.error("DB.findByEmail error:", e); return null; }
     }
 
     async function findById(id) {
-      const { data, error } = await supabase.from('users').select('*').eq('id', id).single();
-      if (error && error.code !== 'PGRST116') throw error;
-      return data || null;
+      try {
+        const { data, error } = await supabase.from('users').select('*').eq('id', id).maybeSingle();
+        if (error) throw error;
+        return data || null;
+      } catch (e) { console.error("DB.findById error:", e); return null; }
     }
 
     async function register({name, email, password}) {
@@ -51,7 +57,7 @@
       const newUser = { 
         name: name.trim(), 
         email: email.toLowerCase().trim(), 
-        password, // TODO: Hash password with bcrypt
+        password: password, 
         role: "student", 
         status: "active", 
         joined: new Date().toISOString().split("T")[0], 
@@ -3169,7 +3175,7 @@ function AdminSettings(_ref12) {
 function AdminLinksPanel(_ref13) {
   var notify = _ref13.notify;
   var _React$useState = React.useState(function () {
-      return SiteDB.getLinks();
+      return data.links || [];
     }),
     _React$useState2 = _slicedToArray(_React$useState, 2),
     links = _React$useState2[0],
@@ -3809,42 +3815,60 @@ function Modal(_ref15) {
 // =================== SITE CHANGES DB ===================
 var SiteDB = (function () {
   async function get() {
-    const { data: courses } = await supabase.from('courses').select('*, videos(*, quiz_questions(*, quiz_options(*)))').order('id', { ascending: true });
-    const { data: settings } = await supabase.from('site_settings').select('*');
-    const { data: links } = await supabase.from('useful_links').select('*').order('sort_order', { ascending: true });
-    
-    // Transform settings array to object
-    const settingsObj = {};
-    if (settings) {
-      settings.forEach(s => settingsObj[s.setting_key] = s.setting_value);
+    try {
+      const [coursesRes, settingsRes, linksRes, videosRes, questionsRes, optionsRes, reviewsRes] = await Promise.all([
+        supabase.from('courses').select('*').order('id', { ascending: true }),
+        supabase.from('site_settings').select('*'),
+        supabase.from('useful_links').select('*').order('sort_order', { ascending: true }),
+        supabase.from('videos').select('*').order('sort_order', { ascending: true }),
+        supabase.from('quiz_questions').select('*').order('sort_order', { ascending: true }),
+        supabase.from('quiz_options').select('*').order('option_index', { ascending: true }),
+        supabase.from('reviews').select('*').eq('status', 'approved')
+      ]);
+
+      if (coursesRes.error) throw coursesRes.error;
+
+      const settingsObj = {};
+      if (settingsRes.data) {
+        settingsRes.data.forEach(s => settingsObj[s.setting_key] = s.setting_value);
+      }
+
+      const videos = videosRes.data || [];
+      const questions = questionsRes.data || [];
+      const options = optionsRes.data || [];
+
+      const transformedCourses = (coursesRes.data || []).map(c => {
+        const courseVideos = videos.filter(v => v.course_id === c.id).map(v => {
+          const videoQuestions = questions.filter(q => q.video_id === v.id).map(q => {
+            return {
+              q: q.question,
+              answer: q.answer_index,
+              options: options.filter(o => o.question_id === q.id).map(o => o.option_text)
+            };
+          });
+          return {
+            ...v,
+            youtubeId: v.youtube_id,
+            quiz: videoQuestions
+          };
+        });
+        return { ...c, videos: courseVideos };
+      });
+
+      return {
+        courses: transformedCourses,
+        settings: settingsObj,
+        links: linksRes.data || [],
+        reviews: reviewsRes.data || []
+      };
+    } catch (e) {
+      console.error("SiteDB.get error:", e);
+      throw e;
     }
-
-    // Transform courses to match original structure
-    const transformedCourses = (courses || []).map(c => ({
-      ...c,
-      videos: (c.videos || []).map(v => ({
-        ...v,
-        youtubeId: v.youtube_id,
-        quiz: (v.quiz_questions || []).map(q => ({
-          q: q.question,
-          answer: q.answer_index,
-          options: (q.quiz_options || []).sort((a,b) => a.option_index - b.option_index).map(o => o.option_text)
-        }))
-      }))
-    }));
-
-    return {
-      courses: transformedCourses,
-      settings: settingsObj,
-      links: links || []
-    };
   }
 
   async function saveLinks(links) {
-    // For simplicity, we'll just handle deletions and upserts if needed, 
-    // but the app usually replaces the whole list.
-    // To be safe and compatible with the current UI:
-    await supabase.from('useful_links').delete().neq('id', 0); // Clear all
+    await supabase.from('useful_links').delete().neq('id', 0);
     const { error } = await supabase.from('useful_links').insert(links.map((l, i) => ({
       title: l.title,
       description: l.desc || l.description,
@@ -3857,11 +3881,9 @@ var SiteDB = (function () {
   }
 
   async function saveCourses(courses) {
-    // Complex nested update. For this migration, we'll implement a basic upsert for courses.
-    // In a real app, you'd update specific tables.
     for (const course of courses) {
-      const { data: cData, error: cError } = await supabase.from('courses').upsert({
-        id: course.id > 1000000000 ? undefined : course.id, // Handle new items
+      const { error } = await supabase.from('courses').upsert({
+        id: course.id > 2000000000 ? undefined : course.id,
         title: course.title,
         icon: course.icon,
         category: course.category,
@@ -3869,9 +3891,8 @@ var SiteDB = (function () {
         price: course.price,
         status: course.status,
         students: course.students
-      }).select().single();
-      
-      if (cError) console.error(cError);
+      });
+      if (error) console.error("Course upsert error:", error);
     }
   }
 
@@ -3900,7 +3921,7 @@ function LinksPage(_ref16) {
     user = _ref16.user,
     notify = _ref16.notify;
   var _React$useState9 = React.useState(function () {
-      return SiteDB.getLinks();
+      return data.links || [];
     }),
     _React$useState0 = _slicedToArray(_React$useState9, 2),
     links = _React$useState0[0],
@@ -4304,13 +4325,14 @@ function App() {
         const [siteData, users] = await Promise.all([SiteDB.get(), DB.getAllSafe()]);
         setData({
           users: users,
-          courses: siteData.courses || initialData.courses,
-          settings: siteData.settings || initialData.settings,
-          links: siteData.links || []
+          courses: siteData.courses,
+          settings: siteData.settings,
+          links: siteData.links,
+          reviews: siteData.reviews || []
         });
       } catch (err) {
         console.error("Failed to load data from Supabase:", err);
-        notify("فشل الاتصال بقاعدة البيانات، تم تحميل البيانات الافتراضية", "error");
+        notify("فشل الاتصال بقاعدة البيانات، تأكد من إعدادات Supabase", "error");
       } finally {
         setLoading(false);
       }
@@ -4367,13 +4389,15 @@ function App() {
       return next;
     });
     
-    // Async save to Supabase
     try {
       if (next.courses !== data.courses) {
         await SiteDB.saveCourses(next.courses);
       }
       if (next.settings !== data.settings && next.settings) {
         await SiteDB.saveSettings(next.settings);
+      }
+      if (next.links !== data.links) {
+        await SiteDB.saveLinks(next.links);
       }
     } catch (err) {
       console.error("Save failed:", err);
