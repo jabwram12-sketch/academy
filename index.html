@@ -6,60 +6,99 @@
   <title>أكاديمية البعد الجديد</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const SUPABASE_URL = 'https://dhvtpreywsghgqagetyb.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRodnRwcmV5d3NnaGdxYWdldHliIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExNTYyMjIsImV4cCI6MjA5NjczMjIyMn0.upnIVJ0edhLfNo8cZnHl1QGDfqfZCrfLnB3k3xfwhNc';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  </script>
   <!-- قاعدة بيانات المستخدمين (مدمجة) -->
   <script>
   const DB = (() => {
-    const KEY = "academy_users_db";
-    const defaultUsers = [
-      { id:1, name:"المدير العام", email:"sj4380004@gmail.com", password:"Eng.Jehad0522983702", role:"admin", status:"active", joined:"2024-01-01", avatar:"م" },
-      { id:2, name:"أحمد محمد", email:"ahmed@student.com", password:"student123", role:"student", status:"active", joined:"2024-03-15", avatar:"أ" },
-      { id:3, name:"سارة علي", email:"sara@student.com", password:"student123", role:"student", status:"active", joined:"2024-04-10", avatar:"س" },
-      { id:4, name:"محمد خالد", email:"m.khalid@teacher.com", password:"teacher123", role:"teacher", status:"active", joined:"2024-02-01", avatar:"م" },
-      { id:5, name:"فاطمة حسن", email:"fatima@student.com", password:"student123", role:"student", status:"banned", joined:"2024-05-01", avatar:"ف" },
-    ];
- 
-    function _load() {
-      try { const r = localStorage.getItem(KEY); if (r) return JSON.parse(r); } catch(_) {}
-      _save(defaultUsers); return defaultUsers;
+    function _sanitize(u) { if(!u) return null; const {password, ...safe} = u; return safe; }
+
+    async function getAll() {
+      const { data, error } = await supabase.from('users').select('*').order('id', { ascending: true });
+      if (error) throw error;
+      return data;
     }
-    function _save(users) { try { localStorage.setItem(KEY, JSON.stringify(users)); } catch(_) {} }
-    function _sanitize(u) { const {password, ...safe} = u; return safe; }
- 
-    function getAll() { return _load(); }
-    function getAllSafe() { return _load().map(_sanitize); }
-    function findByEmail(email) { return _load().find(u => u.email.toLowerCase() === email.toLowerCase()) || null; }
-    function findById(id) { return _load().find(u => u.id === id) || null; }
- 
-    function register({name, email, password}) {
-      const users = _load();
+
+    async function getAllSafe() {
+      const users = await getAll();
+      return users.map(_sanitize);
+    }
+
+    async function findByEmail(email) {
+      const { data, error } = await supabase.from('users').select('*').eq('email', email.toLowerCase()).single();
+      if (error && error.code !== 'PGRST116') throw error;
+      return data || null;
+    }
+
+    async function findById(id) {
+      const { data, error } = await supabase.from('users').select('*').eq('id', id).single();
+      if (error && error.code !== 'PGRST116') throw error;
+      return data || null;
+    }
+
+    async function register({name, email, password}) {
       if (!name || name.trim().length < 2) return { ok:false, error:"الاسم يجب أن يحتوي على حرفين على الأقل" };
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok:false, error:"البريد الإلكتروني غير صحيح" };
       if (!password || password.length < 6) return { ok:false, error:"كلمة المرور يجب أن تكون 6 أحرف على الأقل" };
-      if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) return { ok:false, error:"البريد الإلكتروني مسجل مسبقاً" };
-      const newUser = { id:Date.now(), name:name.trim(), email:email.toLowerCase().trim(), password, role:"student", status:"active", joined:new Date().toISOString().split("T")[0], avatar:name.trim()[0] };
-      users.push(newUser); _save(users);
-      return { ok:true, user:_sanitize(newUser) };
+      
+      const existing = await findByEmail(email);
+      if (existing) return { ok:false, error:"البريد الإلكتروني مسجل مسبقاً" };
+
+      const newUser = { 
+        name: name.trim(), 
+        email: email.toLowerCase().trim(), 
+        password, // TODO: Hash password with bcrypt
+        role: "student", 
+        status: "active", 
+        joined: new Date().toISOString().split("T")[0], 
+        avatar: name.trim()[0] 
+      };
+
+      const { data, error } = await supabase.from('users').insert([newUser]).select().single();
+      if (error) return { ok:false, error: error.message };
+      return { ok:true, user: _sanitize(data) };
     }
- 
-    function login({email, password}) {
-      const user = findByEmail(email);
+
+    async function login({email, password}) {
+      const user = await findByEmail(email);
       if (!user) return { ok:false, error:"البريد الإلكتروني غير مسجل" };
       if (user.password !== password) return { ok:false, error:"كلمة المرور غير صحيحة" };
       if (user.status === "banned") return { ok:false, error:"هذا الحساب موقوف، تواصل مع الإدارة" };
-      return { ok:true, user:_sanitize(user) };
+      return { ok:true, user: _sanitize(user) };
     }
- 
-    function remove(id) { _save(_load().filter(u => u.id !== id)); }
-    function toggleBan(id) { _save(_load().map(u => u.id===id ? {...u, status: u.status==="banned"?"active":"banned"} : u)); }
-    function update(id, fields) { _save(_load().map(u => u.id===id ? {...u, ...fields} : u)); }
-    function addUser({name, email, password="123456", role="student"}) {
-      const result = register({name, email, password});
-      if (result.ok && role !== "student") update(result.user.id, {role});
+
+    async function remove(id) {
+      const { error } = await supabase.from('users').delete().eq('id', id);
+      if (error) throw error;
+    }
+
+    async function toggleBan(id) {
+      const user = await findById(id);
+      if (!user) return;
+      const newStatus = user.status === "banned" ? "active" : "banned";
+      const { error } = await supabase.from('users').update({ status: newStatus }).eq('id', id);
+      if (error) throw error;
+    }
+
+    async function update(id, fields) {
+      const { error } = await supabase.from('users').update(fields).eq('id', id);
+      if (error) throw error;
+    }
+
+    async function addUser({name, email, password="123456", role="student"}) {
+      const result = await register({name, email, password});
+      if (result.ok && role !== "student") {
+        await update(result.user.id, {role});
+        result.user.role = role;
+      }
       return result;
     }
-    function reset() { _save(defaultUsers); }
- 
-    return { getAll, getAllSafe, findByEmail, findById, register, login, remove, toggleBan, update, addUser, reset };
+
+    return { getAll, getAllSafe, findByEmail, findById, register, login, remove, toggleBan, update, addUser };
   })();
   </script>
   <style>
@@ -3768,112 +3807,91 @@ function Modal(_ref15) {
 }
  
 // =================== SITE CHANGES DB ===================
-var SiteDB = function () {
-  var SITE_KEY = "academy_site_data";
-  var defaultLinks = [{
-    id: 1,
-    title: "ديسموس",
-    desc: "آلة حاسبة بيانية مجانية عبر الإنترنت",
-    url: "https://www.desmos.com/calculator",
-    icon: "📊",
-    color: "#e9425e"
-  }, {
-    id: 2,
-    title: "ولفرام ألفا",
-    desc: "محرك حساب ذكي لحل المسائل الرياضية",
-    url: "https://www.wolframalpha.com",
-    icon: "🧮",
-    color: "#dd1100"
-  }, {
-    id: 3,
-    title: "خان أكاديمي",
-    desc: "منصة تعليمية مجانية في الرياضيات والعلوم",
-    url: "https://ar.khanacademy.org",
-    icon: "🎓",
-    color: "#14bf96"
-  }, {
-    id: 4,
-    title: "ويكيبيديا - رياضيات",
-    desc: "مرجع شامل للمفاهيم الرياضية",
-    url: "https://ar.wikipedia.org/wiki/%D8%B1%D9%8A%D8%A7%D8%B6%D9%8A%D8%A7%D8%AA",
-    icon: "📖",
-    color: "#3366cc"
-  }, {
-    id: 5,
-    title: "GeoGebra",
-    desc: "أداة رسم هندسي وحاسبة جبرية تفاعلية",
-    url: "https://www.geogebra.org",
-    icon: "📐",
-    color: "#7744aa"
-  }, {
-    id: 6,
-    title: "3Blue1Brown",
-    desc: "قناة يوتيوب تشرح الرياضيات بصرياً",
-    url: "https://www.youtube.com/@3blue1brown",
-    icon: "🔵",
-    color: "#1a237e"
-  }, {
-    id: 7,
-    title: "MIT OpenCourseWare",
-    desc: "دورات أكاديمية مجانية من معهد MIT",
-    url: "https://ocw.mit.edu",
-    icon: "🏛️",
-    color: "#8b0000"
-  }, {
-    id: 8,
-    title: "Paul Math Notes",
-    desc: "ملاحظات رياضية للجبر وحساب التفاضل",
-    url: "https://tutorial.math.lamar.edu",
-    icon: "📝",
-    color: "#2e7d32"
-  }];
-  function _load() {
-    try {
-      var r = localStorage.getItem(SITE_KEY);
-      if (r) return JSON.parse(r);
-    } catch (_) {}
-    var d = {
-      links: defaultLinks,
-      courses: null,
-      settings: null
+var SiteDB = (function () {
+  async function get() {
+    const { data: courses } = await supabase.from('courses').select('*, videos(*, quiz_questions(*, quiz_options(*)))').order('id', { ascending: true });
+    const { data: settings } = await supabase.from('site_settings').select('*');
+    const { data: links } = await supabase.from('useful_links').select('*').order('sort_order', { ascending: true });
+    
+    // Transform settings array to object
+    const settingsObj = {};
+    if (settings) {
+      settings.forEach(s => settingsObj[s.setting_key] = s.setting_value);
+    }
+
+    // Transform courses to match original structure
+    const transformedCourses = (courses || []).map(c => ({
+      ...c,
+      videos: (c.videos || []).map(v => ({
+        ...v,
+        youtubeId: v.youtube_id,
+        quiz: (v.quiz_questions || []).map(q => ({
+          q: q.question,
+          answer: q.answer_index,
+          options: (q.quiz_options || []).sort((a,b) => a.option_index - b.option_index).map(o => o.option_text)
+        }))
+      }))
+    }));
+
+    return {
+      courses: transformedCourses,
+      settings: settingsObj,
+      links: links || []
     };
-    _save(d);
-    return d;
   }
-  function _save(d) {
-    try {
-      localStorage.setItem(SITE_KEY, JSON.stringify(d));
-    } catch (_) {}
+
+  async function saveLinks(links) {
+    // For simplicity, we'll just handle deletions and upserts if needed, 
+    // but the app usually replaces the whole list.
+    // To be safe and compatible with the current UI:
+    await supabase.from('useful_links').delete().neq('id', 0); // Clear all
+    const { error } = await supabase.from('useful_links').insert(links.map((l, i) => ({
+      title: l.title,
+      description: l.desc || l.description,
+      url: l.url,
+      icon: l.icon,
+      color: l.color,
+      sort_order: i + 1
+    })));
+    if (error) throw error;
   }
-  function get() {
-    return _load();
+
+  async function saveCourses(courses) {
+    // Complex nested update. For this migration, we'll implement a basic upsert for courses.
+    // In a real app, you'd update specific tables.
+    for (const course of courses) {
+      const { data: cData, error: cError } = await supabase.from('courses').upsert({
+        id: course.id > 1000000000 ? undefined : course.id, // Handle new items
+        title: course.title,
+        icon: course.icon,
+        category: course.category,
+        units: course.units,
+        price: course.price,
+        status: course.status,
+        students: course.students
+      }).select().single();
+      
+      if (cError) console.error(cError);
+    }
   }
-  function saveLinks(links) {
-    var d = _load();
-    d.links = links;
-    _save(d);
+
+  async function saveSettings(settings) {
+    const upserts = Object.entries(settings).map(([key, value]) => ({
+      setting_key: key,
+      setting_value: String(value),
+      updated_at: new Date().toISOString()
+    }));
+    const { error } = await supabase.from('site_settings').upsert(upserts);
+    if (error) throw error;
   }
-  function saveCourses(courses) {
-    var d = _load();
-    d.courses = courses;
-    _save(d);
-  }
-  function saveSettings(settings) {
-    var d = _load();
-    d.settings = settings;
-    _save(d);
-  }
-  function getLinks() {
-    return _load().links || defaultLinks;
-  }
+
   return {
     get: get,
     saveLinks: saveLinks,
     saveCourses: saveCourses,
-    saveSettings: saveSettings,
-    getLinks: getLinks
+    saveSettings: saveSettings
   };
-}();
+})();
  
 // =================== LINKS PAGE ===================
 function LinksPage(_ref16) {
@@ -4271,18 +4289,34 @@ function App() {
     _useState38 = _slicedToArray(_useState37, 2),
     user = _useState38[0],
     setUser = _useState38[1];
-  var _useState39 = useState(function () {
-      var saved = SiteDB.get();
-      return _objectSpread(_objectSpread({}, initialData), {}, {
-        users: DB.getAllSafe(),
-        courses: saved.courses || initialData.courses,
-        settings: saved.settings || initialData.settings,
-        links: saved.links || []
-      });
-    }),
+  var _useState39 = useState(initialData),
     _useState40 = _slicedToArray(_useState39, 2),
     data = _useState40[0],
     setData = _useState40[1];
+  var _useStateLoading = useState(true),
+    _useStateLoading2 = _slicedToArray(_useStateLoading, 2),
+    loading = _useStateLoading2[0],
+    setLoading = _useStateLoading2[1];
+
+  useEffect(function () {
+    async function init() {
+      try {
+        const [siteData, users] = await Promise.all([SiteDB.get(), DB.getAllSafe()]);
+        setData({
+          users: users,
+          courses: siteData.courses || initialData.courses,
+          settings: siteData.settings || initialData.settings,
+          links: siteData.links || []
+        });
+      } catch (err) {
+        console.error("Failed to load data from Supabase:", err);
+        notify("فشل الاتصال بقاعدة البيانات، تم تحميل البيانات الافتراضية", "error");
+      } finally {
+        setLoading(false);
+      }
+    }
+    init();
+  }, []);
   var _useState41 = useState({
       email: "",
       password: ""
@@ -4316,27 +4350,35 @@ function App() {
     setFilterCat = _useState54[1];
  
   // مزامنة قائمة المستخدمين مع DB عند أي تغيير
-  var syncUsers = function syncUsers() {
+  var syncUsers = async function syncUsers() {
+    const users = await DB.getAllSafe();
     setData(function (d) {
       return _objectSpread(_objectSpread({}, d), {}, {
-        users: DB.getAllSafe()
+        users: users
       });
     });
   };
  
   // setData الذكية: تحفظ في localStorage فوراً عند أي تعديل على الدورات أو الإعدادات
-  var smartSetData = function smartSetData(updater) {
+  var smartSetData = async function smartSetData(updater) {
+    let next;
     setData(function(prevData) {
-      var next = typeof updater === 'function' ? updater(prevData) : updater;
-      // حفظ فوري بعد كل تغيير
-      if (next.courses !== prevData.courses) {
-        SiteDB.saveCourses(next.courses);
-      }
-      if (next.settings !== prevData.settings && next.settings) {
-        SiteDB.saveSettings(next.settings);
-      }
+      next = typeof updater === 'function' ? updater(prevData) : updater;
       return next;
     });
+    
+    // Async save to Supabase
+    try {
+      if (next.courses !== data.courses) {
+        await SiteDB.saveCourses(next.courses);
+      }
+      if (next.settings !== data.settings && next.settings) {
+        await SiteDB.saveSettings(next.settings);
+      }
+    } catch (err) {
+      console.error("Save failed:", err);
+      notify("فشل حفظ التغييرات في قاعدة البيانات", "error");
+    }
   };
   var notify = function notify(msg) {
     var type = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : "success";
@@ -4348,25 +4390,32 @@ function App() {
       return setNotification(null);
     }, 3000);
   };
-  var handleLogin = function handleLogin() {
-    var result = DB.login({
-      email: loginForm.email,
-      password: loginForm.password
-    });
-    if (!result.ok) {
-      setLoginError(result.error);
-      return;
-    }
-    var found = result.user;
-    setLoginError("");
-    if (found.role === "admin") {
-      setUser(found);
-      setPage("admin");
-      notify("مرحباً بك في لوحة التحكم");
-    } else {
-      setUser(found);
-      setPage("dashboard");
-      notify("مرحباً بك " + found.name);
+  var handleLogin = async function handleLogin() {
+    setLoading(true);
+    try {
+      var result = await DB.login({
+        email: loginForm.email,
+        password: loginForm.password
+      });
+      if (!result.ok) {
+        setLoginError(result.error);
+        return;
+      }
+      var found = result.user;
+      setLoginError("");
+      if (found.role === "admin") {
+        setUser(found);
+        setPage("admin");
+        notify("مرحباً بك في لوحة التحكم");
+      } else {
+        setUser(found);
+        setPage("dashboard");
+        notify("مرحباً بك " + found.name);
+      }
+    } catch (err) {
+      setLoginError("حدث خطأ أثناء تسجيل الدخول");
+    } finally {
+      setLoading(false);
     }
   };
   var handleLogout = function handleLogout() {
@@ -4376,11 +4425,16 @@ function App() {
   };
  
   // دالة التسجيل الجديد
-  var handleRegister = function handleRegister(formData) {
-    var result = DB.register(formData);
-    if (!result.ok) return result;
-    syncUsers();
-    return result;
+  var handleRegister = async function handleRegister(formData) {
+    setLoading(true);
+    try {
+      var result = await DB.register(formData);
+      if (!result.ok) return result;
+      await syncUsers();
+      return result;
+    } finally {
+      setLoading(false);
+    }
   };
   var navItems = [{
     label: "الرئيسية",
@@ -4403,7 +4457,27 @@ function App() {
       minHeight: "100vh",
       position: "relative"
     }
-  }, notification && /*#__PURE__*/React.createElement("div", {
+  }, loading && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed",
+      inset: 0,
+      background: "rgba(10,10,15,0.8)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 10000,
+      backdropFilter: "blur(10px)"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 50,
+      height: 50,
+      border: "4px solid rgba(108,71,255,0.1)",
+      borderTop: "4px solid #6c47ff",
+      borderRadius: "50%",
+      animation: "spin 1s linear infinite"
+    }
+  }), /*#__PURE__*/React.createElement("style", null, "@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }")), notification && /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
       top: 20,
