@@ -2686,7 +2686,7 @@ function AdminCourses(_ref10) {
     courseId: videoModal.courseId,
     video: videoModal.video,
     data: data,
-    setData: smartSetData,
+    setData: setData,
     notify: notify,
     onClose: function onClose() {
       return setVideoModal(null);
@@ -2695,7 +2695,7 @@ function AdminCourses(_ref10) {
     courseId: quizModal.courseId,
     videoId: quizModal.videoId,
     data: data,
-    setData: smartSetData,
+    setData: setData,
     notify: notify,
     onClose: function onClose() {
       return setQuizModal(null);
@@ -3516,24 +3516,24 @@ function AdminPanel(_ref14) {
     data: data
   }), adminSection === "users" && /*#__PURE__*/React.createElement(AdminUsers, {
     data: data,
-    setData: smartSetData,
+    setData: setData,
     setModal: setModal,
     notify: notify,
     syncUsers: syncUsers
   }), adminSection === "courses" && /*#__PURE__*/React.createElement(AdminCourses, {
     data: data,
-    setData: smartSetData,
+    setData: setData,
     setModal: setModal,
     notify: notify
   }), adminSection === "reviews" && /*#__PURE__*/React.createElement(AdminReviews, {
     data: data,
-    setData: smartSetData,
+    setData: setData,
     notify: notify
   }), adminSection === "links" && /*#__PURE__*/React.createElement(AdminLinksPanel, {
     notify: notify
   }), adminSection === "settings" && /*#__PURE__*/React.createElement(AdminSettings, {
     data: data,
-    setData: smartSetData,
+    setData: setData,
     notify: notify
   })));
 }
@@ -4382,6 +4382,15 @@ function App() {
     syncUsers();
     return result;
   };
+  var BACK_PAGES = {
+    "courses": "home",
+    "links": "home",
+    "course-view": "courses",
+    "login": "home",
+    "register": "home",
+    "dashboard": "home",
+    "admin": "home"
+  };
   var navItems = [{
     label: "الرئيسية",
     id: "home"
@@ -4513,7 +4522,28 @@ function App() {
     onClick: function onClick() {
       return setPage("login");
     }
-  }, "\u062A\u0633\u062C\u064A\u0644 \u062F\u062E\u0648\u0644"))), page === "home" && /*#__PURE__*/React.createElement(HomePage, {
+  }, "\u062A\u0633\u062C\u064A\u0644 \u062F\u062E\u0648\u0644"))), BACK_PAGES[page] && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "12px 40px 0 40px"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn-outline",
+    style: {
+      padding: "7px 16px",
+      fontSize: 13,
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 6
+    },
+    onClick: function onClick() {
+      var target = BACK_PAGES[page];
+      if (typeof target === "function") {
+        target();
+      } else {
+        setPage(target);
+      }
+    }
+  }, "\u2192", " \u0631\u062C\u0648\u0639")), page === "home" && /*#__PURE__*/React.createElement(HomePage, {
     setPage: setPage,
     data: data,
     setSelectedCourse: setSelectedCourse,
@@ -4568,4 +4598,3 @@ root.render(/*#__PURE__*/React.createElement(App, null));
 </script>
 </body>
 </html>
- 
